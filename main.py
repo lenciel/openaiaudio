@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 
 SPEECH_MODEL = "gpt-4o-mini-tts"
 TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe"
+# gpt-4o-mini-transcribe does not support srt format
+TRANSCRIPTION_SRT_MODEL = "whisper-1"
 # The voice and style used for the speech synthesis, from Brian
 SPEECH_VOICE = "shimmer"
 TONE_STYLE_INSTRUCTIONS = "Speak in meditative, soothing, emotive tone"
@@ -30,7 +32,7 @@ async def text_to_audio(client, text, output_filename):
         )
 
 
-async def transcribe_audio(client, audio_filename):
+async def audio_to_text(client, audio_filename):
     audio_file = await asyncio.to_thread(open, audio_filename, "rb")
     stream = await client.audio.transcriptions.create(
         model=TRANSCRIPTION_MODEL,
@@ -43,6 +45,19 @@ async def transcribe_audio(client, audio_filename):
         if event.type == "transcript.text.delta":
             transcript += event.delta
     with open(audio_filename + '.txt', 'w') as f:
+        f.write(transcript)
+    audio_file.close()
+    return transcript
+
+
+async def audio_to_srt(client, audio_filename):
+    audio_file = await asyncio.to_thread(open, audio_filename, "rb")
+    transcript = await client.audio.transcriptions.create(
+        model=TRANSCRIPTION_SRT_MODEL,
+        file=audio_file,
+        response_format="srt"
+    )
+    with open(audio_filename + '.srt', 'w') as f:
         f.write(transcript)
     audio_file.close()
     return transcript
@@ -61,8 +76,9 @@ def create_client():
 def main():
     load_dotenv()
     client = create_client()
-    asyncio.run(transcribe_audio(client, "inputs/GEN1.mp3"))
-    with open("outputs/GEN1.mp3.txt", "r") as f:
+    asyncio.run(audio_to_text(client, "inputs/GEN1.mp3"))
+    asyncio.run(audio_to_srt(client, "inputs/GEN1.mp3"))
+    with open("inputs/GEN1.mp3.txt", "r") as f:
         text = f.read()
     asyncio.run(text_to_audio(client, text, "outputs/GEN1_new.mp3"))
 
