@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import os
 import asyncio
-from openai import AsyncOpenAI, AuthenticationError
+from openai import AsyncOpenAI, AuthenticationError, APITimeoutError, APIConnectionError
 from openai.helpers import LocalAudioPlayer
 from dotenv import load_dotenv
 
@@ -50,17 +50,24 @@ async def audio_to_text(client, audio_filename):
     return transcript
 
 
-async def audio_to_srt(client, audio_filename):
-    audio_file = await asyncio.to_thread(open, audio_filename, "rb")
-    transcript = await client.audio.transcriptions.create(
-        model=TRANSCRIPTION_SRT_MODEL,
-        file=audio_file,
-        response_format="srt"
-    )
-    with open(audio_filename + '.srt', 'w') as f:
-        f.write(transcript)
-    audio_file.close()
-    return transcript
+async def audio_to_srt(client, audio_filename, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            audio_file = await asyncio.to_thread(open, audio_filename, "rb")
+            transcript = await client.audio.transcriptions.create(
+                model=TRANSCRIPTION_SRT_MODEL,
+                file=audio_file,
+                response_format="srt"
+            )
+            with open(audio_filename + '.srt', 'w') as f:
+                f.write(transcript)
+            audio_file.close()
+            return transcript
+        except (AuthenticationError, APITimeoutError, APIConnectionError) as e:
+            audio_file.close()
+            if attempt == max_retries - 1:
+                raise
+            await asyncio.sleep(15 ** attempt)  # exponential backoff
 
 
 def create_client():
@@ -76,11 +83,20 @@ def create_client():
 def main():
     load_dotenv()
     client = create_client()
-    asyncio.run(audio_to_text(client, "inputs/GEN1.mp3"))
-    asyncio.run(audio_to_srt(client, "inputs/GEN1.mp3"))
-    with open("inputs/GEN1.mp3.txt", "r") as f:
-        text = f.read()
-    asyncio.run(text_to_audio(client, text, "outputs/GEN1_new.mp3"))
+    # asyncio.run(audio_to_text(client, "inputs/GEN1.mp3"))
+
+    # Traverse all folders under inputs/audios
+    input_dir = "inputs/audios"
+    for root, dirs, files in os.walk(input_dir):
+        for file in files:
+            if file.lower().endswith(('.mp3')):  # Add more audio extensions if needed
+                audio_file = os.path.join(root, file)
+                print(f"Processing {audio_file}...")
+                asyncio.run(audio_to_srt(client, audio_file))
+
+    # with open("inputs/GEN1.mp3.txt", "r") as f:
+    #     text = f.read()
+    # asyncio.run(text_to_audio(client, text, "outputs/GEN1_new.mp3"))
 
 
 if __name__ == "__main__":
