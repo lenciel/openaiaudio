@@ -1,9 +1,17 @@
-import os
-import re
-from datetime import timedelta
 
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+import os
+import re
+import logging
+from datetime import timedelta
+
+logger = logging.getLogger('correct_srt')
+hdlr = logging.FileHandler('correct_srt.log')
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+hdlr.setFormatter(formatter)
+logger.addHandler(hdlr)
+logger.setLevel(logging.DEBUG)
 
 
 def rename_folders():
@@ -232,23 +240,28 @@ def parse_verses(file_content):
     return {int(num): text.replace('\n', ' ').strip() for num, text in verses}
 
 
-def is_similar_text(text_a: str, text_b: str) -> bool:
+def is_text_subset(text_a: str, text_b: str) -> bool:
+    # Split texts into words and convert to lowercase
     words_a = set(text_a.lower().split())
     words_b = set(text_b.lower().split())
 
-    if not words_a:
+    # Determine which set is smaller
+    shorter_set = words_a if len(words_a) <= len(words_b) else words_b
+    longer_set = words_b if len(words_a) <= len(words_b) else words_a
+
+    if not shorter_set:
         return False
 
-    common_words = words_a.intersection(words_b)
-    similarity_ratio = len(common_words) / len(words_a)
+    # Count how many words from shorter text appear in longer text
+    common_words = shorter_set.intersection(longer_set)
+    similarity_ratio = len(common_words) / len(shorter_set)
 
     return similarity_ratio >= 0.6
 
 
-def merge_srt_by_verses_new(srt_entries, verses):
-
+def merge_srt_by_verses(srt_entries, verses):
     merged = []
-    current_entry = None
+    srt_entries = srt_entries.copy()  # Create a copy to modify
 
     for verse_num, verse_text in verses.items():
         verse_text_clean = re.sub(r'[^\w\s]', '', verse_text).lower()
@@ -259,63 +272,30 @@ def merge_srt_by_verses_new(srt_entries, verses):
             "text": verse_text
         }
 
-        for entry in srt_entries:
+        i = 0
+        while i < len(srt_entries):
+            entry = srt_entries[i]
             entry_text_clean = re.sub(r'[^\w\s]', '', entry["text"]).lower()
 
-            # Check if entry text is at the start of verse text
-            print(
-                f"Checking entry: {entry_text_clean} against verse: {verse_num} {verse_text_clean}")
-            if is_similar_text(entry_text_clean, verse_text_clean):
+            logger.debug(
+                f"Checking entry {srt_entries.index(entry)}: {entry_text_clean} against verse: {verse_num} {verse_text_clean}")
+
+            if is_text_subset(entry_text_clean, verse_text_clean):
                 if current_entry["start"] is None:
                     current_entry["start"] = entry["start"]
-                    print(
+                    logger.debug(
                         f"Updated current_entry start to: {entry["start"]} for verse {verse_num}")
                 current_entry["end"] = entry["end"]
-                print(
+                logger.debug(
                     f"Updated current_entry end to: {entry["end"]} for verse {verse_num}")
-                srt_entries.remove(entry)
+                srt_entries.pop(i)  # Remove the matched entry
+                continue  # Continue checking next entry for this verse
+            else:
+                break  # Exit loop and move to next verse
 
+            i += 1
         if current_entry["start"] is not None and current_entry["end"] is not None:
             merged.append(current_entry)
-
-    return merged
-
-
-def merge_srt_by_verses(srt_entries, verses):
-    merged = []
-    current_entry = {
-        "index": None,
-        "start": None,
-        "end": None,
-        "text": None
-    }
-    for verse_num, verse_text in verses.items():
-        verse_text_clean = re.sub(r'[^\w\s]', '', verse_text).lower()
-        for entry in srt_entries:
-            entry_text_clean = re.sub(r'[^\w\s]', '', entry["text"]).lower()
-            if entry_text_clean in verse_text_clean:
-                print(
-                    f"Matched entry: {entry_text_clean} for verse {verse_num} - {verse_text_clean}")
-                matched_verse = verse_num
-                # Remove matched entry
-                srt_entries.remove(entry)
-                break
-
-        if matched_verse > 0:
-            if current_entry["index"] != matched_verse:
-                # Save previous verse if exists
-                if current_entry["index"] is not None:
-                    merged.append(current_entry.copy())
-                # Start new verse
-                current_entry = {
-                    "index": matched_verse,
-                    "start": entry["start"],
-                    "end": entry["end"],
-                    "text": verses[matched_verse]
-                }
-            else:
-                # Update end time for current verse
-                current_entry["end"] = entry["end"]
 
     return merged
 
@@ -345,7 +325,7 @@ def generate_srt_from_files(input_srt, input_verses, output_srt):
     # Process
     srt_entries = parse_srt(srt_content)
     verses = parse_verses(verses_content)
-    merged_srt = merge_srt_by_verses_new(srt_entries, verses)
+    merged_srt = merge_srt_by_verses(srt_entries, verses)
     final_srt = generate_srt(merged_srt)
 
     # Save result
@@ -355,35 +335,44 @@ def generate_srt_from_files(input_srt, input_verses, output_srt):
 
 if __name__ == "__main__":
     # rename_foldes()
-
     # rename_files()
 
-    generate_srt_from_files(
-        "inputsfinished/audios/1.GEN/GEN1.mp3.srt", "inputsfinished/audios/1.GEN/GEN1.txt", "inputsfinished/audios/1.GEN/GEN1_merged.srt")
+    # generate_srt_from_files(
+    #     "inputs/audios/1.GEN/GEN1.mp3.srt", "inputs/audios/1.GEN/GEN1.txt", "outputs/GEN1_merged.srt")
+    # generate_srt_from_files(
+    #     "inputs/audios/5.DEU/DEU1.mp3.srt", "inputs/audios/5.DEU/DEU1.txt", "outputs/DEU1_merged.srt")
+    # generate_srt_from_files(
+    #     "inputs/audios/5.DEU/DEU2.mp3.srt", "inputs/audios/5.DEU/DEU2.txt", "outputs/DEU2_merged.srt")
 
-    # base_path = 'inputs/audios'
-    # for folder_name in os.listdir(base_path):
-    #     folder_path = os.path.join(base_path, folder_name)
-    #     if os.path.isdir(folder_path):
-    #         # Process each file in the folder
-    #         for filename in os.listdir(folder_path):
-    #             if filename.endswith('.srt'):
-    #                 # Get the base name without extension
-    #                 base_name = os.path.splitext(filename)[0].split('.')[0]
+    base_path = 'inputs/audios'
+    for folder_name in os.listdir(base_path):
+        folder_path = os.path.join(base_path, folder_name)
+        if os.path.isdir(folder_path):
+            # Process each file in the folder
+            for filename in os.listdir(folder_path):
+                if filename.endswith('.srt'):
+                    # Get the base name without extension
+                    base_name = os.path.splitext(filename)[0].split('.')[0]
 
-    #                 # Construct paths
-    #                 srt_path = os.path.join(folder_path, f"{base_name}.srt")
-    #                 txt_path = os.path.join(folder_path, f"{base_name}.txt")
-    #                 output_path = os.path.join(
-    #                     folder_path, f"{base_name}_merged.srt")
-
-    #                 # Generate merged srt if txt file exists
-    #                 if os.path.exists(txt_path):
-    #                     try:
-    #                         generate_srt_from_files(
-    #                             srt_path, txt_path, output_path)
-    #                         print(f"Generated merged SRT for {filename}")
-    #                     except Exception as e:
-    #                         print(f"Error processing {filename}: {str(e)}")
-    #                 else:
-    #                     print(f"No matching text file found for {filename}")
+                    # Construct paths
+                    srt_path = os.path.join(
+                        folder_path, f"{base_name}.mp3.srt")
+                    txt_path = os.path.join(folder_path, f"{base_name}.txt")
+                    output_path = os.path.join(
+                        folder_path, f"{base_name}_merged.srt")
+                    logger.debug(f"Processing srt_path {srt_path}...")
+                    logger.debug(f"Processing txt_path {txt_path}...")
+                    logger.debug(f"Processing output_path {output_path}...")
+                    # Generate merged srt if txt file exists
+                    if os.path.exists(txt_path):
+                        try:
+                            logger.info(
+                                f"Generating merged SRT for {filename}")
+                            generate_srt_from_files(
+                                srt_path, txt_path, output_path)
+                        except Exception as e:
+                            logger.error(
+                                f"Error processing {filename}: {str(e)}")
+                    else:
+                        logger.error(
+                            f"No matching text file found for {filename}")

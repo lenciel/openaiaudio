@@ -13,3 +13,4 @@ wheels/
 .DS_Store
 outputs
 *.srt
+*.log
